@@ -1,171 +1,104 @@
-# RAG Project - Frontend Client
+# RAG Project — Frontend
 
-A modern Next.js web application for the RAG (Retrieval-Augmented Generation) project with authentication and responsive UI.
+Next.js web UI for the RAG platform: sign in with Clerk, create projects, upload files or add URLs to a project's knowledge base, watch each document move through the processing pipeline, and chat with an assistant that answers with citations.
 
-## Overview
+It talks to the .NET Api (see the [main README](../README.md)) over REST, sending the Clerk session token as a bearer token.
 
-This is a Next.js 16 frontend built with React 19, TypeScript, and Tailwind CSS. It integrates Clerk for authentication and provides a clean, user-friendly interface for managing RAG projects.
+## Tech stack
 
-## Tech Stack
+- **Next.js 16.1** (App Router, `output: "standalone"`) + **React 19.2** + **TypeScript 5**
+- **Tailwind CSS 4** (via `@tailwindcss/postcss`)
+- **Clerk** (`@clerk/nextjs` 6) for authentication
+- `react-dropzone` (file uploads), `react-hot-toast` (notifications), `lucide-react` (icons)
+- Geist Sans / Geist Mono fonts via `next/font`
 
-- **Framework**: Next.js (16.1.4)
-- **Runtime**: React (19.2.3) with React DOM (19.2.3)
-- **Language**: TypeScript (5)
-- **Styling**: Tailwind CSS (4) with PostCSS (4)
-- **Authentication**: Clerk (@clerk/nextjs 6.36.8)
-- **Linting**: ESLint (9)
-- **Node.js**: 18+ recommended
-
-## Project Structure
+## Project structure
 
 ```
-client/
+frontend/
 ├── src/
-│   ├── app/                         # Next.js 13+ app router
-│   │   ├── layout.tsx               # Root layout with ClerkProvider
-│   │   ├── page.tsx                 # Home page (redirects based on auth)
-│   │   ├── globals.css              # Global styles
-│   │   ├── about/
-│   │   │   └── page.tsx             # About page
-│   │   ├── projects/
-│   │   │   └── page.tsx             # Projects listing page
-│   │   ├── sign-in/
-│   │   │   └── [[...sign-in]]/
-│   │   │       └── page.tsx         # Clerk sign-in page
-│   │   └── sign-up/
-│   │       └── [[...sign-up]]/
-│   │           └── page.tsx         # Clerk sign-up page
-│   └── proxy.ts                     # Clerk proxy for auth
-├── public/                          # Static assets
-├── next.config.ts                   # Next.js configuration
-├── tsconfig.json                    # TypeScript configuration
-├── package.json                     # Project dependencies
-└── README.md                        # This file
+│   ├── app/
+│   │   ├── layout.tsx                         # Root layout: ClerkProvider + Toaster
+│   │   ├── page.tsx                           # "/" — redirects to /projects or /sign-in
+│   │   ├── globals.css
+│   │   ├── (auth)/
+│   │   │   ├── sign-in/[[...sign-in]]/page.tsx
+│   │   │   └── sign-up/[[...sign-up]]/page.tsx
+│   │   └── (dashboard)/projects/
+│   │       ├── layout.tsx                     # Auth check + Sidebar
+│   │       ├── page.tsx                       # Projects grid, create/delete projects
+│   │       └── [projectId]/
+│   │           ├── page.tsx                   # Knowledge base (files/URLs), conversations, settings
+│   │           └── chats/[chatId]/page.tsx    # Chat with citations + message feedback
+│   ├── components/
+│   │   ├── chat/                              # ChatInterface, MessageList, MessageItem, ChatInput, feedback modal
+│   │   ├── projects/                          # ProjectsGrid, CreateProjectModal, KnowledgeBaseSidebar,
+│   │   │   │                                  # ConversationsList, FileDetailsModal
+│   │   │   └── document-details/              # Pipeline viewer: partitioning / chunking / summarising steps, chunk inspector
+│   │   ├── layout/Sidebar.tsx
+│   │   └── ui/                                # LoadingSpinner, NotFound
+│   ├── lib/
+│   │   ├── api/index.ts                       # apiClient: get/post/put/delete + direct S3 upload
+│   │   └── types/index.ts                     # Shared TypeScript types
+│   └── proxy.ts                               # Clerk route protection (Next.js 16's replacement for middleware.ts)
+├── public/
+├── Dockerfile                                 # Multi-stage node:20-alpine build, runs the standalone server
+├── next.config.ts
+└── package.json
 ```
 
-## Installation
+## Routes
+
+| Route | Auth | Purpose |
+|---|---|---|
+| `/` | — | Redirects to `/projects` when signed in, otherwise `/sign-in` |
+| `/sign-in`, `/sign-up` | Public | Clerk hosted components |
+| `/projects` | Required | List, create and delete projects |
+| `/projects/[projectId]` | Required | Manage documents (upload / add URL / inspect / delete), chats and RAG settings |
+| `/projects/[projectId]/chats/[chatId]` | Required | Chat with the assistant |
+
+Public routes are declared in `src/proxy.ts`; everything else is protected by `clerkMiddleware`, and the dashboard layout also redirects unauthenticated users.
+
+## Getting started
 
 ### Prerequisites
 
-- Node.js 18+ (npm or yarn)
-- Clerk account for authentication
+- Node.js 20.9+ (required by Next.js 16)
+- A Clerk application (publishable + secret key)
+- The Api running (default `http://localhost:8000`)
 
-### Setup Steps
+### Setup
 
-1. **Navigate to client directory**:
-   ```bash
-   cd client
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   npm install
-   ```
-
-3. **Configure environment variables**:
-   Create a `.env.local` file with:
-   ```
-   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=<your-clerk-publishable-key>
-   CLERK_SECRET_KEY=<your-clerk-secret-key>
-   ```
-
-4. **Start development server**:
-   ```bash
-   npm run dev
-   ```
-   Access at `http://localhost:3000`
-
-## Available Scripts
-
-- `npm run dev` - Start development server with hot reload
-- `npm run build` - Build production-ready application
-- `npm start` - Start production server
-- `npm run lint` - Run ESLint code quality checks
-
-## Pages & Routes
-
-| Route | Component | Auth Required | Status |
-|-------|-----------|---------------|--------|
-| `/` | page.tsx | No | Redirects based on auth |
-| `/sign-in` | sign-in/page.tsx | No | Clerk auth UI |
-| `/sign-up` | sign-up/page.tsx | No | Clerk registration |
-| `/projects` | projects/page.tsx | Yes | Placeholder |
-| `/about` | about/page.tsx | No | Placeholder |
-
-## Authentication with Clerk
-
-**Setup Overview**:
-- `ClerkProvider` wraps the app in `layout.tsx`
-- `src/proxy.ts` manages auth routes (Clerk's newer convention)
-- Public routes: `/`, `/sign-in/*`, `/sign-up/*`
-
-**Protecting a Page**:
-```typescript
-import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
-
-export const dynamic = "force-dynamic";
-
-export default async function ProtectedPage() {
-  const { userId } = await auth();
-  if (!userId) redirect("/sign-in");
-  return <div>Protected Content</div>;
-}
-```
-
-## Styling
-
-- **Tailwind CSS v4**: Utility-first CSS framework
-- **Global Styles**: `src/app/globals.css`
-- **Fonts**: Geist Sans & Mono from Google Fonts
-
-## Deployment
-
-### Vercel (Recommended)
 ```bash
-npm run build
-npm start
+cd Code/frontend
+cp .env.example .env.local
+# fill in NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY
+npm install
+npm run dev
 ```
-Then push to GitHub and connect to Vercel dashboard.
 
-### Self-hosted
+Open http://localhost:3000.
+
+### Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | Base URL of the .NET Api (falls back to `http://localhost:8000`) |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key (baked in at build time) |
+| `CLERK_SECRET_KEY` | Clerk secret key (read at runtime by the server) |
+
+## Scripts
+
+- `npm run dev` — development server with hot reload
+- `npm run build` — production build (standalone output)
+- `npm start` — run the production build
+- `npm run lint` — ESLint
+
+## Docker
+
+The frontend is built and run by the root `docker-compose.yml` (from `Code/`). `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` are passed as build args, and `CLERK_SECRET_KEY` is passed at runtime; all values come from `Code/.env`.
+
 ```bash
-npm run build
-npm start
+cd Code
+docker compose up --build frontend
 ```
-
-### Pre-deployment Checklist
-- [ ] Environment variables configured
-- [ ] Clerk keys correct for production
-- [ ] `npm run lint` passes
-- [ ] `npm run build` succeeds locally
-- [ ] All tests pass
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| Auth returns null | Add `export const dynamic = "force-dynamic";` to server components |
-| Redirect loop on sign-in | Ensure `/sign-in(.*)` and `/sign-up(.*)` are in public routes in `proxy.ts` |
-| Port 3000 in use | Kill process or use `npm run dev -- -p 3001` |
-| Missing Clerk keys | Create `.env.local` with both `NEXT_PUBLIC_*` and `CLERK_SECRET_KEY` |
-
-## Project Status
-
-**Version**: 0.1.0 (In Development)
-
-- ✅ Authentication with Clerk
-- ✅ Basic page structure
-- 🚧 Projects page implementation
-- 🚧 Backend API integration
-- ⏳ Additional features
-
-## Support
-
-- [Next.js Docs](https://nextjs.org/docs)
-- [Clerk Docs](https://clerk.com/docs)
-- [Tailwind Docs](https://tailwindcss.com/docs)
-
-## License
-
-MIT

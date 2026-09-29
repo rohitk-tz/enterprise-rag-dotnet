@@ -7,7 +7,7 @@ The system is a three-service application:
 | Service | Language / Framework | Responsibility |
 |---|---|---|
 | `backend` (**Api** + **Workers**) | .NET 10 / ASP.NET Core, Clean Architecture | REST API, auth, orchestration, RAG retrieval, chat, background job processing |
-| `services/parsing-service` | Python 3.11+ / FastAPI / `unstructured` | Partitions & chunks raw files (PDF, DOCX, PPTX, TXT, MD, HTML) into structured content |
+| `services/parsing-service` | Python 3.11+ / FastAPI / `unstructured` | Partitions & chunks uploaded files (PDF, DOCX, PPTX, TXT, MD) and crawled web pages (HTML) into structured content |
 | `frontend` | Next.js 16 / React 19 / TypeScript | Web UI for managing projects, documents, and chats |
 
 > The backend's code comments reference an earlier Python/FastAPI implementation (`server/routes/*.py`, `server/tasks.py`) — this repository is a from-scratch .NET rewrite of that original service, with the document-parsing step kept as a standalone Python microservice because it depends on the `unstructured` library.
@@ -64,10 +64,10 @@ The `Api` and `Workers` executables both host the **same** `Application` + `Infr
 
 ## How a document becomes searchable
 
-Uploading a file or adding a URL kicks off `ProcessDocumentCommand`, run as a background job (`DocumentProcessingJob` → Hangfire → `Workers`). The document's `ProcessingStatus` is updated at each stage so the UI can poll progress:
+Uploading a file or adding a URL kicks off `ProcessDocumentCommand`, run as a background job (`DocumentProcessingJob` → Hangfire → `Workers`). The document starts as **`queued`** when the upload is confirmed or the URL is added, and its `ProcessingStatus` is updated at each stage so the UI can poll progress:
 
-1. **`partitioning`** — the raw file is fetched from S3 (or the URL is fetched via ScrapingBee for web sources) and streamed to the parsing service.
-2. **`chunking`** — the parsing service (`services/parsing-service`) uses `unstructured` to partition the document (PDF/DOCX/PPTX/TXT/MD/HTML) and groups elements into chunks with `chunk_by_title`, separating out tables (as HTML) and images (as base64) from plain narrative text.
+1. **`partitioning`** — the raw file is fetched from S3 (or the URL is fetched via ScrapingBee for web sources) and streamed to the parsing service's `POST /partition-and-chunk`. The service (`services/parsing-service`) uses `unstructured` to partition the document (`hi_res` strategy with table-structure inference for PDF/DOCX/PPTX; plain partitioners for TXT/MD; `partition_html` for URL sources) and groups elements with `chunk_by_title` (`max_characters=3000`, `new_after_n_chars=2400`, `combine_text_under_n_chars=500`), separating out tables (as HTML) and images (as base64) from plain narrative text.
+2. **`chunking`** — the returned chunks are recorded on the document (`total_chunks` is stored in the status details).
 3. **`summarising`** — any chunk that contains a table or image is summarized by `SemanticKernelSummarizationService` (OpenAI `gpt-4.1` via Semantic Kernel) into embeddable text; plain-text chunks pass through unchanged.
 4. **`vectorization`** — all processed chunks are embedded in a single batch (`OpenAiEmbeddingService`) and persisted as `DocumentChunk` rows with a `pgvector` embedding column, plus the original text/tables/images JSON (used later to build chat context).
 5. **`completed`** — the document is now part of every chat search within its project.
@@ -94,18 +94,31 @@ Configurable per project (`ProjectSettings.RagStrategy`), implemented in `RagRet
 | `multi-query-vector` | An LLM (`SemanticKernelQueryVariationService`) generates `NumberOfQueries` paraphrases of the question; each is vector-searched independently and the result sets are fused with RRF. |
 | `multi-query-hybrid` | Same query-variation step, but each variation runs a full hybrid (vector + keyword) search before fusion. |
 
-After retrieval, if `RerankingEnabled` is set, the fused results are reranked by `CohereRerankService` and truncated to `FinalContextSize` chunks before being sent to the LLM.
+Each search returns up to `ChunksPerSearch` chunks above `SimilarityThreshold`. After retrieval, if `RerankingEnabled` is set, the results are reranked by `CohereRerankService` (`RerankingModel`). The `hybrid` and `multi-query-*` strategies are then truncated to `FinalContextSize` chunks; `basic` is not truncated.
+
+New projects are created with these defaults (`CreateProjectCommandHandler`):
+
+| Setting | Default |
+|---|---|
+| `EmbeddingModel` | `text-embedding-3-large` |
+| `RagStrategy` | `basic` |
+| `ChunksPerSearch` / `FinalContextSize` | `10` / `5` |
+| `SimilarityThreshold` | `0.3` |
+| `NumberOfQueries` | `5` |
+| `RerankingEnabled` / `RerankingModel` | `true` / `rerank-english-v3.0` |
+| `VectorWeight` / `KeywordWeight` | `0.7` / `0.3` |
 
 ## Tech stack
 
 **Backend**
-- .NET 10 / ASP.NET Core Web API, API versioning (`Asp.Versioning`)
+- .NET 10 / ASP.NET Core Web API, API versioning (`Asp.Versioning`), Swagger (`Swashbuckle`)
 - Clean Architecture: `Domain` → `Application` (CQRS via **MediatR**, validation via **FluentValidation**) → `Infrastructure` → `Api` / `Workers`
 - **PostgreSQL** + **pgvector** (via `Npgsql`, `Pgvector.EntityFrameworkCore`) as the primary store and vector index
 - **Redis** + **Hangfire** for background job processing and dashboard (`/hangfire`)
 - **Microsoft.Semantic Kernel** + **OpenAI** for summarization, embeddings, chat answers, and query-variation generation
 - **Cohere Rerank API** for optional result reranking
 - **ScrapingBee** for fetching URL-sourced documents
+- `Microsoft.Extensions.Http.Resilience` (standard retry/circuit-breaker handler) on the ScrapingBee and Cohere HTTP clients
 - **AWS S3 SDK** against an S3-compatible provider (Tigris by default) for document storage via presigned URLs
 - **Clerk** JWT bearer authentication + webhook-driven user provisioning
 - **Serilog** (structured console logging) and **OpenTelemetry** (tracing + metrics); traces are exported over OTLP to **Jaeger**, with log records attached to their spans as span events
@@ -118,7 +131,7 @@ After retrieval, if `RerankingEnabled` is set, the fused results are reranked by
 **Frontend**
 - **Next.js 16** (App Router) + **React 19** + **TypeScript**
 - **Tailwind CSS 4**
-- **Clerk** (`@clerk/nextjs`) for auth
+- **Clerk** (`@clerk/nextjs`) for auth; route protection lives in `src/proxy.ts` (Next.js 16's replacement for `middleware.ts`)
 - `react-dropzone` for file uploads, `react-hot-toast` for notifications, `lucide-react` for icons
 
 **Testing**
@@ -128,8 +141,8 @@ After retrieval, if `RerankingEnabled` is set, the fused results are reranked by
 ## Repository layout
 
 ```
-.
-├── docker-compose.yml            # api, worker, parsing-service, frontend, redis, postgres(pgvector)
+Code/
+├── docker-compose.yml            # api, worker, parsing-service, frontend, jaeger, redis, postgres(pgvector)
 ├── .env.example                  # env vars consumed by docker-compose
 ├── backend/
 │   ├── RagMigration.sln
@@ -137,10 +150,10 @@ After retrieval, if `RerankingEnabled` is set, the fused results are reranked by
 │   │   ├── Domain/               # Entities (Project, ProjectDocument, ProjectSettings, Chat, Message, DocumentChunk, User), no external deps
 │   │   ├── Application/          # CQRS commands/queries/handlers/validators, RAG services, interfaces (ports)
 │   │   ├── Contracts/            # DTOs shared between Application and Api
-│   │   ├── Infrastructure/       # EF Core, repositories, Semantic Kernel/OpenAI, Cohere, S3, ScrapingBee, Hangfire, auth
+│   │   ├── Infrastructure/       # EF Core (+ Persistence/Migrations), repositories, Semantic Kernel/OpenAI, Cohere, S3, ScrapingBee, Hangfire, auth, observability
 │   │   ├── Api/                  # ASP.NET Core host: controllers, middleware, Swagger, DI wiring
 │   │   ├── SharedKernel/         # Base Entity<TId>
-│   │   └── Workers/               # Background-job host (shares Application/Infrastructure with Api)
+│   │   └── Workers/              # Background-job host (shares Application/Infrastructure with Api)
 │   └── tests/
 │       ├── Domain.Tests/
 │       ├── Application.Tests/
@@ -151,8 +164,9 @@ After retrieval, if `RerankingEnabled` is set, the fused results are reranked by
 │   └── Dockerfile
 └── frontend/
     ├── src/app/                  # Next.js App Router: (auth) sign-in/up, (dashboard) projects/chats
-    ├── src/components/           # chat, projects, layout, ui
-    └── src/lib/                  # api client, shared types
+    ├── src/components/           # chat, projects (incl. document-details pipeline viewer), layout, ui
+    ├── src/lib/                  # api client, shared types
+    └── src/proxy.ts              # Clerk route protection
 ```
 
 ### Backend layers, in dependency order
@@ -178,7 +192,7 @@ Every external dependency (database, OpenAI, Cohere, S3, ScrapingBee, the parsin
 ### Prerequisites
 
 - .NET 10 SDK (backend)
-- Node.js 18+ (frontend)
+- Node.js 20.9+ (frontend — required by Next.js 16)
 - Python 3.11–3.12 + [Poetry](https://python-poetry.org/) (parsing service, if running outside Docker)
 - Docker + Docker Compose (recommended — runs everything, including Postgres/pgvector and Redis)
 - Accounts/keys for: Clerk, OpenAI, ScrapingBee, Cohere, and an S3-compatible bucket (Tigris by default)
@@ -203,9 +217,9 @@ This starts:
 | Frontend | http://localhost:3000 |
 | Api | http://localhost:8000 (Swagger UI in Development, `/health`, `/hangfire`) |
 | Parsing service | http://localhost:8001/docs |
-| Postgres (pgvector) | localhost:5435 |
-| Redis | localhost:6380 |
-| Jaeger UI (traces + attached logs) | http://localhost:16686 (OTLP on 4317 gRPC / 4318 HTTP) |
+| Postgres (`pgvector/pgvector:pg17`) | localhost:5435 (user/password `postgres`, db `rag`) |
+| Redis 7 | localhost:6380 |
+| Jaeger v2 UI (traces + attached logs, in-memory) | http://localhost:16686 (OTLP on 4317 gRPC / 4318 HTTP) |
 
 The Api applies EF Core migrations automatically on startup (`Database.Migrate()`).
 
@@ -253,23 +267,27 @@ Read from `IConfiguration` (environment variables use the `Section__Key` convent
 | `ConnectionStrings:Postgres` | Api, Workers | PostgreSQL connection string |
 | `ConnectionStrings:Redis` | Api, Workers | Redis connection string (Hangfire storage) |
 | `Clerk:Authority` | Api | Clerk JWT issuer for bearer-token validation |
-| `S3:BucketName` | Infrastructure | Object storage bucket for uploaded documents |
-| `AWS:ServiceURL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | Infrastructure | S3-compatible storage credentials/endpoint (Tigris by default) |
+| `S3:BucketName` | Infrastructure | Object storage bucket for uploaded documents (default `rag-project`) |
+| `AWS:ServiceURL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | Infrastructure | S3-compatible storage credentials/endpoint. In Docker Compose, `AWS:ServiceURL` comes from `AWS_S3_ENDPOINT_URL` (default `https://t3.storage.dev`, Tigris) and `AWS_REGION` defaults to `auto` |
 | `ParsingService:BaseUrl` | Api, Workers | Base URL of the Python parsing microservice |
 | `ScrapingBee:ApiKey` | Infrastructure | Crawling URL-sourced documents |
 | `OpenAI:ApiKey` | Infrastructure | Summarization (`gpt-4.1`), chat answers (`gpt-4o`), embeddings, query variation |
 | `Cohere:ApiKey` | Infrastructure | Reranking (only called when a project has `RerankingEnabled=true`) |
-| `Cors:AllowedOrigins` | Api | Allowed origins for the frontend |
+| `Cors:AllowedOrigins` | Api | Allowed origins for the frontend (default `http://localhost:3000`) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Api, Workers | OTLP (gRPC) endpoint for traces; defaults to `http://localhost:4317`, set to `http://jaeger:4317` in Docker Compose |
 
 Frontend (`frontend/.env*`): `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`.
 
 ## API surface
 
-All routes are versioned (`/v1/api/...`) with an unversioned alias (`/api/...`) and require a Clerk bearer token except the webhook endpoint.
+All routes are versioned (`/v1/api/...`) with an unversioned alias (`/api/...`) and require a Clerk bearer token, except `GET /` and the webhook endpoint.
 
 | Method | Route | Purpose |
 |---|---|---|
+| `GET` | `/` | Anonymous root/status endpoint |
+| `GET` | `/health` | Health checks (Postgres, Redis, parsing service) |
+| `GET` | `/hangfire` | Hangfire dashboard |
+| `GET` | `/api/ping` | Authenticated ping (plus `throws-not-found` / `throws-forbidden` test routes used by `ExceptionHandlingTests`) |
 | `POST` | `/create-user` | Clerk webhook — provisions a `User` on `user.created` |
 | `GET` | `/api/projects` | List the current user's projects |
 | `POST` | `/api/projects` | Create a project |
@@ -297,6 +315,6 @@ cd backend
 dotnet test
 ```
 
-- `Domain.Tests` — entity/invariant unit tests
-- `Application.Tests` — command/query handler unit tests
-- `Integration.Tests` — full HTTP pipeline tests via `WebApplicationFactory`, backed by a real Postgres container (`Testcontainers.PostgreSql`) — requires Docker to be running
+- `Domain.Tests` — base `Entity` unit tests
+- `Application.Tests` — `CreateUserFromWebhookCommandValidator` and `CurrentUserAccessor` unit tests
+- `Integration.Tests` — auth, projects, chats, files, user webhook, root endpoint, exception handling and schema-migration tests over the full HTTP pipeline via `WebApplicationFactory`, backed by a real Postgres container (`Testcontainers.PostgreSql`) — requires Docker to be running
