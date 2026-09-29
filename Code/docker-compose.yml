@@ -1,0 +1,112 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/src/Api/Dockerfile
+    ports:
+      - "8000:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      parsing-service:
+        condition: service_started
+      jaeger:
+        condition: service_started
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=rag;Username=postgres;Password=postgres
+      - ConnectionStrings__Redis=redis:6379
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - Clerk__Authority=${CLERK_AUTHORITY}
+      - ParsingService__BaseUrl=http://parsing-service:8001
+      - OpenAI__ApiKey=${OPENAI_API_KEY}
+      - ScrapingBee__ApiKey=${SCRAPINGBEE_API_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-auto}
+      - AWS__ServiceURL=${AWS_S3_ENDPOINT_URL:-https://t3.storage.dev}
+      - Cohere__ApiKey=${COHERE_API_KEY}
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/src/Workers/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      parsing-service:
+        condition: service_started
+      api:
+        condition: service_started
+      jaeger:
+        condition: service_started
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=rag;Username=postgres;Password=postgres
+      - ConnectionStrings__Redis=redis:6379
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - ParsingService__BaseUrl=http://parsing-service:8001
+      - OpenAI__ApiKey=${OPENAI_API_KEY}
+      - ScrapingBee__ApiKey=${SCRAPINGBEE_API_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-auto}
+      - AWS__ServiceURL=${AWS_S3_ENDPOINT_URL:-https://t3.storage.dev}
+      - Cohere__ApiKey=${COHERE_API_KEY}
+
+  parsing-service:
+    build:
+      context: ./services/parsing-service
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    environment:
+      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
+
+  # Jaeger v2 all-in-one: receives OTLP traces (with logs attached as span events) from the
+  # Api and Workers. In-memory storage, so traces are lost on restart. UI: http://localhost:16686
+  jaeger:
+    image: jaegertracing/jaeger:latest
+    ports:
+      - "16686:16686" # UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+
+  redis:
+    image: redis:7
+    ports:
+      - "6380:6379"
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    ports:
+      - "5435:5432"
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=rag
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  postgres-data:

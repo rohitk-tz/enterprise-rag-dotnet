@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG Quiz Challenge</title>
+<style>
+  :root{
+    --purple:#7C3AED;
+    --orange:#FB923C;
+    --gold:#FBBF24;
+    --pink:#EC4899;
+    --cyan:#22D3EE;
+    --green:#22C55E;
+    --red:#EF4444;
+    --bg1:#0d0620;
+    --bg2:#1f0a35;
+    --bg3:#2c0f4a;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{
+    width:100%; height:100%;
+    overflow:hidden;
+    background:var(--bg1);
+    font-family:'Segoe UI', Arial, Helvetica, sans-serif;
+    color:#fff;
+    user-select:none;
+  }
+  body{
+    position:relative;
+    background:
+      radial-gradient(circle at 15% 20%, rgba(124,58,237,0.35), transparent 45%),
+      radial-gradient(circle at 85% 15%, rgba(236,72,153,0.30), transparent 45%),
+      radial-gradient(circle at 50% 90%, rgba(34,211,238,0.25), transparent 50%),
+      linear-gradient(160deg, var(--bg1), var(--bg2) 55%, var(--bg3));
+  }
+
+  .blob{
+    position:absolute; border-radius:50%; filter:blur(60px); opacity:0.35; pointer-events:none;
+    animation:float 12s ease-in-out infinite;
+  }
+  .blob1{width:380px;height:380px; background:var(--purple); top:-100px; left:-100px;}
+  .blob2{width:420px;height:420px; background:var(--pink); bottom:-140px; right:-120px; animation-delay:2s;}
+  .blob3{width:300px;height:300px; background:var(--cyan); bottom:10%; left:10%; animation-delay:4s;}
+  @keyframes float{
+    0%,100%{transform:translateY(0) translateX(0);}
+    50%{transform:translateY(-30px) translateX(20px);}
+  }
+
+  .screen{
+    position:absolute; inset:0;
+    display:none;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    padding:40px;
+    opacity:0;
+    transform:scale(0.96);
+    transition:opacity .4s ease, transform .4s ease;
+  }
+  .screen.active{
+    display:flex;
+    opacity:1;
+    transform:scale(1);
+  }
+  #screen-wheel, #screen-question, #screen-result, #screen-final{
+    padding-top:130px;
+  }
+
+  /* ---------- Scoreboard ---------- */
+  #scoreboard{
+    position:absolute; top:0; left:0; right:0;
+    display:flex; justify-content:space-between; align-items:center;
+    padding:18px 40px;
+    z-index:20;
+    opacity:0; pointer-events:none;
+    transition:opacity .4s ease;
+  }
+  #scoreboard.visible{opacity:1; pointer-events:auto;}
+  .score-pill{
+    display:flex; align-items:center; gap:10px;
+    background:rgba(255,255,255,0.08);
+    border:1px solid rgba(255,255,255,0.15);
+    backdrop-filter:blur(6px);
+    padding:10px 22px;
+    border-radius:50px;
+    font-weight:700;
+    font-size:clamp(14px, 1.6vw, 20px);
+  }
+  .score-pill .num{
+    font-size:clamp(18px, 2.2vw, 28px);
+    font-weight:900;
+  }
+  #audienceScore .num{color:var(--gold);}
+  #judgeScore .num{color:var(--cyan);}
+  #roundPill{
+    background:rgba(255,255,255,0.08);
+    border:1px solid rgba(255,255,255,0.15);
+    padding:10px 26px;
+    border-radius:50px;
+    font-weight:800;
+    letter-spacing:1px;
+    font-size:clamp(13px, 1.4vw, 18px);
+  }
+
+  .reset-link{
+    position:absolute; bottom:14px; right:20px;
+    font-size:13px; opacity:0.25; cursor:pointer;
+    letter-spacing:1px; z-index:30;
+    transition:opacity .2s ease;
+  }
+  .reset-link:hover{opacity:0.8;}
+
+  /* ---------- Title Screen ---------- */
+  .kicker{
+    font-size:clamp(14px, 1.6vw, 20px);
+    letter-spacing:6px;
+    color:var(--gold);
+    font-weight:700;
+    margin-bottom:18px;
+  }
+  h1.title{
+    font-size:clamp(42px, 7.5vw, 96px);
+    font-weight:900;
+    line-height:1.05;
+    background:linear-gradient(90deg, var(--gold), var(--orange), var(--pink), var(--purple));
+    -webkit-background-clip:text;
+    background-clip:text;
+    color:transparent;
+    text-shadow:0 0 60px rgba(124,58,237,0.4);
+    margin-bottom:22px;
+  }
+  .subtitle{
+    font-size:clamp(16px, 2vw, 26px);
+    color:#e6e1f5;
+    margin-bottom:8px;
+    font-weight:600;
+  }
+  .tagline{
+    font-size:clamp(18px, 2.4vw, 30px);
+    margin-top:20px;
+    margin-bottom:50px;
+    font-weight:800;
+  }
+  .tagline .bar-emoji{filter:drop-shadow(0 0 10px rgba(251,191,36,0.6));}
+  #screen-title h1.title{font-size:clamp(38px, min(7.5vw, 9vh), 96px); margin-bottom:14px;}
+  #screen-title .tagline{margin-top:12px; margin-bottom:26px;}
+
+  /* ---------- Rules ---------- */
+  .rules{
+    width:min(1080px, 100%);
+    margin-bottom:clamp(24px, 4vh, 44px);
+  }
+  .rules-title{
+    font-size:clamp(12px, 1.2vw, 15px);
+    letter-spacing:6px;
+    font-weight:800;
+    color:rgba(255,255,255,0.55);
+    margin-bottom:clamp(12px, 2vh, 18px);
+  }
+  .rules-steps{
+    list-style:none;
+    display:grid;
+    grid-template-columns:repeat(5, 1fr);
+    gap:14px;
+  }
+  .rules-steps li{
+    background:rgba(255,255,255,0.06);
+    border:1px solid rgba(255,255,255,0.12);
+    border-radius:18px;
+    padding:clamp(14px, 2.2vh, 22px) 12px;
+    display:flex; flex-direction:column; align-items:center; gap:6px;
+  }
+  .rules-steps .icon{font-size:clamp(26px, 3vw, 36px); line-height:1; margin-bottom:4px;}
+  .rules-steps .step-title{
+    font-size:clamp(14px, 1.4vw, 18px);
+    font-weight:800;
+    color:#fff;
+  }
+  .rules-steps .step-text{
+    font-size:clamp(12px, 1.1vw, 14px);
+    color:rgba(255,255,255,0.65);
+    line-height:1.35;
+  }
+  .rules-steps li.win .step-title{color:var(--green);}
+  .rules-steps li.lose .step-title{color:#f87171;}
+
+  .btn{
+    border:none; cursor:pointer;
+    font-family:inherit;
+    font-weight:900;
+    letter-spacing:1px;
+    text-transform:uppercase;
+    border-radius:18px;
+    padding:22px 60px;
+    font-size:clamp(18px, 2.2vw, 30px);
+    color:#0d0620;
+    background:linear-gradient(90deg, var(--gold), var(--orange));
+    box-shadow:0 10px 30px rgba(251,146,60,0.4), inset 0 -4px 0 rgba(0,0,0,0.15);
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .btn:hover{transform:translateY(-3px) scale(1.03); box-shadow:0 16px 40px rgba(251,146,60,0.55);}
+  .btn:active{transform:translateY(0) scale(0.98);}
+
+  .btn-outline{
+    background:transparent;
+    color:#fff;
+    border:2px solid rgba(255,255,255,0.4);
+    box-shadow:none;
+  }
+  .btn-outline:hover{border-color:#fff; box-shadow:0 0 20px rgba(255,255,255,0.2);}
+
+  /* ---------- Wheel Screen ---------- */
+  .wheel-wrap{
+    position:relative;
+    width:min(56vh, 560px);
+    height:min(56vh, 560px);
+    margin:10px auto 40px;
+  }
+  .pointer{
+    position:absolute; top:-22px; left:50%; transform:translateX(-50%);
+    width:0; height:0;
+    border-left:26px solid transparent;
+    border-right:26px solid transparent;
+    border-top:44px solid var(--gold);
+    z-index:5;
+    filter:drop-shadow(0 4px 6px rgba(0,0,0,0.4));
+  }
+  .wheel{
+    width:100%; height:100%;
+    border-radius:50%;
+    position:relative;
+    border:10px solid rgba(255,255,255,0.9);
+    box-shadow:0 0 0 4px rgba(0,0,0,0.3), 0 20px 60px rgba(0,0,0,0.5);
+    background:conic-gradient(
+      from 0deg,
+      var(--purple) 0deg 72deg,
+      var(--orange) 72deg 144deg,
+      var(--gold) 144deg 216deg,
+      var(--pink) 216deg 288deg,
+      var(--cyan) 288deg 360deg
+    );
+    transition:transform 10s cubic-bezier(0.12, 0.72, 0.15, 1);
+  }
+  .wheel-num{
+    position:absolute;
+    text-align:center;
+    font-size:clamp(28px, 4vw, 46px);
+    font-weight:900;
+    color:rgba(255,255,255,0.95);
+    text-shadow:0 3px 8px rgba(0,0,0,0.5);
+    transform:translate(-50%, -50%);
+  }
+  .wheel-num.used{
+    color:rgba(255,255,255,0.25);
+    text-decoration:line-through;
+  }
+  .wheel-hub{
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:22%; height:22%;
+    background:radial-gradient(circle, #fff, #d8d8e8);
+    border-radius:50%;
+    z-index:4;
+    box-shadow:0 4px 14px rgba(0,0,0,0.5);
+    display:flex; align-items:center; justify-content:center;
+    font-size:clamp(22px, 2.6vw, 32px);
+  }
+
+  /* ---------- Question Screen ---------- */
+  .topic-badge{
+    display:none;
+  }
+  .question-box{
+    max-width:1100px;
+    margin-bottom:50px;
+  }
+  .q-number{
+    font-size:clamp(16px, 1.8vw, 22px);
+    letter-spacing:4px;
+    color:var(--cyan);
+    font-weight:800;
+    margin-bottom:20px;
+  }
+  .q-text{
+    font-size:clamp(30px, 4.4vw, 58px);
+    font-weight:800;
+    line-height:1.3;
+  }
+
+  .timer-ring-wrap{
+    position:relative;
+    width:220px; height:220px;
+    margin-bottom:40px;
+  }
+  .timer-ring-wrap svg{
+    width:100%; height:100%;
+    transform:rotate(-90deg);
+  }
+  .timer-ring-bg{fill:none; stroke:rgba(255,255,255,0.12); stroke-width:14;}
+  .timer-ring-fg{
+    fill:none; stroke:var(--green); stroke-width:14;
+    stroke-linecap:round;
+    transition:stroke-dashoffset 1s linear, stroke .3s ease;
+  }
+  .timer-ring-fg.warn{stroke:var(--red);}
+  .timer-label{
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    font-size:clamp(48px, 6vw, 70px);
+    font-weight:900;
+  }
+  .timer-label.warn{color:var(--red); animation:pulse .6s ease infinite;}
+  @keyframes pulse{
+    0%,100%{transform:scale(1);}
+    50%{transform:scale(1.1);}
+  }
+
+  .action-row{display:flex; gap:24px; flex-wrap:wrap; justify-content:center;}
+
+  .btn-stop{
+    background:linear-gradient(90deg, var(--red), #f97373);
+    box-shadow:0 10px 30px rgba(239,68,68,0.4), inset 0 -4px 0 rgba(0,0,0,0.15);
+    color:#fff;
+  }
+  .btn-correct{
+    background:linear-gradient(90deg, var(--green), #4ade80);
+    box-shadow:0 10px 30px rgba(34,197,94,0.4), inset 0 -4px 0 rgba(0,0,0,0.15);
+    color:#08290f;
+  }
+  .btn-incorrect{
+    background:linear-gradient(90deg, var(--red), #fb7185);
+    box-shadow:0 10px 30px rgba(239,68,68,0.4), inset 0 -4px 0 rgba(0,0,0,0.15);
+    color:#2a0505;
+  }
+
+  .hint-text{
+    margin-top:34px;
+    font-size:clamp(13px, 1.3vw, 16px);
+    color:rgba(255,255,255,0.5);
+    letter-spacing:1px;
+  }
+
+  /* ---------- Result Screen ---------- */
+  .result-emoji{
+    font-size:clamp(70px, 10vw, 130px);
+    margin-bottom:10px;
+    animation:pop .5s ease;
+  }
+  @keyframes pop{
+    0%{transform:scale(0.3); opacity:0;}
+    60%{transform:scale(1.15);}
+    100%{transform:scale(1); opacity:1;}
+  }
+  .result-title{
+    font-size:clamp(38px, 6vw, 74px);
+    font-weight:900;
+    margin-bottom:18px;
+  }
+  .result-title.correct{color:var(--green); text-shadow:0 0 40px rgba(34,197,94,0.5);}
+  .result-title.incorrect{color:var(--red); text-shadow:0 0 40px rgba(239,68,68,0.5);}
+  .result-sub{
+    font-size:clamp(18px, 2.4vw, 30px);
+    font-weight:700;
+    margin-bottom:50px;
+  }
+
+  /* ---------- Final Screen ---------- */
+  .final-tally{
+    display:flex; gap:60px; margin:40px 0 50px;
+    flex-wrap:wrap; justify-content:center;
+  }
+  .final-card{
+    background:rgba(255,255,255,0.07);
+    border:1px solid rgba(255,255,255,0.15);
+    border-radius:24px;
+    padding:34px 50px;
+    min-width:220px;
+  }
+  .final-card .label{font-size:clamp(14px,1.6vw,18px); letter-spacing:2px; opacity:0.7; font-weight:700; margin-bottom:10px;}
+  .final-card .value{font-size:clamp(46px,6vw,72px); font-weight:900;}
+  #finalAudience .value{color:var(--gold);}
+  #finalJudges .value{color:var(--cyan);}
+
+  /* ---------- Confetti ---------- */
+  #confetti-layer{
+    position:absolute; inset:0; pointer-events:none; overflow:hidden; z-index:15;
+  }
+  .confetti-piece{
+    position:absolute; top:-20px;
+    width:12px; height:18px;
+    opacity:0.95;
+    animation:confetti-fall linear forwards;
+  }
+  @keyframes confetti-fall{
+    0%{transform:translateY(0) rotate(0deg); opacity:1;}
+    100%{transform:translateY(110vh) rotate(720deg); opacity:0.9;}
+  }
+
+  @media (max-width: 700px){
+    .rules-steps{grid-template-columns:1fr 1fr;}
+    .final-tally{gap:24px;}
+    .final-card{padding:22px 30px; min-width:150px;}
+  }
+</style>
+</head>
+<body>
+
+<div class="blob blob1"></div>
+<div class="blob blob2"></div>
+<div class="blob blob3"></div>
+<div id="confetti-layer"></div>
+
+<div id="scoreboard">
+  <div class="score-pill" id="audienceScore">🍫 Audience <span class="num" id="audienceCount">0</span></div>
+  <div id="roundPill">ROUND <span id="roundNum">0</span> / 5</div>
+  <div class="score-pill" id="judgeScore">🍫 Judges <span class="num" id="judgeCount">0</span></div>
+</div>
+
+<div class="reset-link" id="resetLink">↺ reset game</div>
+
+<!-- TITLE SCREEN -->
+<div class="screen active" id="screen-title">
+  <div class="kicker">TAAZAA X TALK · LIVE AUDIENCE GAME</div>
+  <h1 class="title">RAG QUIZ<br>CHALLENGE</h1>
+  <div class="subtitle">Let's see who was actually paying attention 👀</div>
+  <div class="tagline">Answer right, walk away with a <span class="bar-emoji">🍫</span> protein bar!</div>
+  <div class="rules">
+    <div class="rules-title">HOW TO PLAY</div>
+    <ol class="rules-steps">
+      <li><div class="icon">🎯</div><div class="step-title">Spin</div><div class="step-text">Wheel picks the question</div></li>
+      <li><div class="icon">⏱️</div><div class="step-title">45 Seconds</div><div class="step-text">The clock starts right away</div></li>
+      <li><div class="icon">✋</div><div class="step-title">Raise a Hand</div><div class="step-text">First hand up gets one shot</div></li>
+      <li class="win"><div class="icon">🍫</div><div class="step-title">Correct</div><div class="step-text">You win a protein bar</div></li>
+      <li class="lose"><div class="icon">⚖️</div><div class="step-title">Wrong or Late</div><div class="step-text">The bar goes to the judges</div></li>
+    </ol>
+  </div>
+  <button class="btn" id="startBtn">Start Game</button>
+</div>
+
+<!-- WHEEL SCREEN -->
+<div class="screen" id="screen-wheel">
+  <div class="kicker">SPIN THE WHEEL</div>
+  <div class="wheel-wrap">
+    <div class="pointer"></div>
+    <div class="wheel" id="wheel">
+      <div class="wheel-num" id="wnum-0" style="left:68.8%; top:24.1%;"><span>1</span></div>
+      <div class="wheel-num" id="wnum-1" style="left:80.4%; top:59.9%;"><span>2</span></div>
+      <div class="wheel-num" id="wnum-2" style="left:50%; top:82%;"><span>3</span></div>
+      <div class="wheel-num" id="wnum-3" style="left:19.6%; top:59.9%;"><span>4</span></div>
+      <div class="wheel-num" id="wnum-4" style="left:31.2%; top:24.1%;"><span>5</span></div>
+      <div class="wheel-hub">🎯</div>
+    </div>
+  </div>
+  <button class="btn" id="spinBtn">Spin!</button>
+  <div class="hint-text">Press ENTER to spin</div>
+</div>
+
+<!-- QUESTION SCREEN -->
+<div class="screen" id="screen-question">
+  <div class="q-number" id="qNumberLabel">QUESTION 1</div>
+  <div class="question-box">
+    <div class="q-text" id="qText">Question text goes here</div>
+  </div>
+
+  <div class="timer-ring-wrap" id="timerRingWrap">
+    <svg viewBox="0 0 220 220">
+      <circle class="timer-ring-bg" cx="110" cy="110" r="95"></circle>
+      <circle class="timer-ring-fg" id="timerRingFg" cx="110" cy="110" r="95"></circle>
+    </svg>
+    <div class="timer-label" id="timerLabel">45</div>
+  </div>
+
+  <div class="action-row" id="timerControls">
+    <button class="btn btn-stop" id="stopBtn">✋ Stop Timer</button>
+  </div>
+
+  <div class="action-row" id="judgeControls" style="display:none;">
+    <button class="btn btn-correct" id="correctBtn">✅ Correct</button>
+    <button class="btn btn-incorrect" id="incorrectBtn">❌ Incorrect</button>
+  </div>
+
+  <div class="hint-text" id="questionHint">Press SPACE when a hand goes up</div>
+</div>
+
+<!-- RESULT SCREEN -->
+<div class="screen" id="screen-result">
+  <div class="result-emoji" id="resultEmoji">🎉</div>
+  <div class="result-title" id="resultTitle">Correct!</div>
+  <div class="result-sub" id="resultSub">+1 protein bar for the audience!</div>
+  <button class="btn" id="nextBtn">Next Question</button>
+</div>
+
+<!-- FINAL SCREEN -->
+<div class="screen" id="screen-final">
+  <div class="kicker">GAME OVER</div>
+  <h1 class="title" style="font-size:clamp(36px,6vw,72px);">THANKS FOR PLAYING!</h1>
+  <div class="final-tally">
+    <div class="final-card" id="finalAudience">
+      <div class="label">AUDIENCE</div>
+      <div class="value" id="finalAudienceVal">0 🍫</div>
+    </div>
+    <div class="final-card" id="finalJudges">
+      <div class="label">JUDGES</div>
+      <div class="value" id="finalJudgesVal">0 🍫</div>
+    </div>
+  </div>
+  <button class="btn btn-outline" id="playAgainBtn">Play Again</button>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var QUESTIONS = [
+    "What does RAG stand for, and What does RAG add to an LLM that makes it useful for enterprise-specific questions??",
+    "Give some reasons why LLMs hallucinate on company-specific questions.",
+    "Your documents can change. How do you prevent RAG from returning stale information?",
+    "If the user asks a question and the correct information isn't retrieved, how can you guarantee that the LLM won't hallucinate?",
+    "What happens if a malicious instruction is hidden inside a document that your RAG system retrieves? How would you prevent this from happening?"
+  ];
+
+  var TIMER_SECONDS = 45;
+  var RING_CIRCUMFERENCE = 2 * Math.PI * 95;
+
+  var state = {
+    round: 0,
+    audienceScore: 0,
+    judgeScore: 0,
+    usedIndexes: [],
+    currentIndex: -1,
+    wheelRotation: 0,
+    timerInterval: null,
+    remaining: TIMER_SECONDS
+  };
+
+  var el = {
+    scoreboard: document.getElementById('scoreboard'),
+    audienceCount: document.getElementById('audienceCount'),
+    judgeCount: document.getElementById('judgeCount'),
+    roundNum: document.getElementById('roundNum'),
+
+    screens: {
+      title: document.getElementById('screen-title'),
+      wheel: document.getElementById('screen-wheel'),
+      question: document.getElementById('screen-question'),
+      result: document.getElementById('screen-result'),
+      final: document.getElementById('screen-final')
+    },
+
+    startBtn: document.getElementById('startBtn'),
+    spinBtn: document.getElementById('spinBtn'),
+    wheel: document.getElementById('wheel'),
+
+    qNumberLabel: document.getElementById('qNumberLabel'),
+    qText: document.getElementById('qText'),
+    timerLabel: document.getElementById('timerLabel'),
+    timerRingFg: document.getElementById('timerRingFg'),
+    timerControls: document.getElementById('timerControls'),
+    judgeControls: document.getElementById('judgeControls'),
+    stopBtn: document.getElementById('stopBtn'),
+    correctBtn: document.getElementById('correctBtn'),
+    incorrectBtn: document.getElementById('incorrectBtn'),
+    questionHint: document.getElementById('questionHint'),
+
+    resultEmoji: document.getElementById('resultEmoji'),
+    resultTitle: document.getElementById('resultTitle'),
+    resultSub: document.getElementById('resultSub'),
+    nextBtn: document.getElementById('nextBtn'),
+
+    finalAudienceVal: document.getElementById('finalAudienceVal'),
+    finalJudgesVal: document.getElementById('finalJudgesVal'),
+    playAgainBtn: document.getElementById('playAgainBtn'),
+
+    resetLink: document.getElementById('resetLink'),
+    confettiLayer: document.getElementById('confetti-layer')
+  };
+
+  el.timerRingFg.style.strokeDasharray = RING_CIRCUMFERENCE;
+
+  function showScreen(name){
+    Object.keys(el.screens).forEach(function(key){
+      el.screens[key].classList.toggle('active', key === name);
+    });
+    if(name === 'title'){
+      el.scoreboard.classList.remove('visible');
+    } else {
+      el.scoreboard.classList.add('visible');
+    }
+  }
+
+  function updateScoreboard(){
+    el.audienceCount.textContent = state.audienceScore;
+    el.judgeCount.textContent = state.judgeScore;
+    el.roundNum.textContent = Math.min(state.round, 5);
+  }
+
+  // ---------- Audio (synthesized, no external files) ----------
+  var audioCtx = null;
+  function getAudioCtx(){
+    if(!audioCtx){
+      try{
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }catch(e){ audioCtx = null; }
+    }
+    return audioCtx;
+  }
+  function playTone(freq, start, duration, type, gain){
+    var ctx = getAudioCtx();
+    if(!ctx) return;
+    var osc = ctx.createOscillator();
+    var g = ctx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.value = freq;
+    g.gain.value = gain || 0.15;
+    osc.connect(g);
+    g.connect(ctx.destination);
+    var t0 = ctx.currentTime + start;
+    osc.start(t0);
+    g.gain.setValueAtTime(g.gain.value, t0);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
+    osc.stop(t0 + duration + 0.02);
+  }
+  function playTick(){ playTone(880, 0, 0.08, 'square', 0.08); }
+  function playSuccessChime(){
+    playTone(523.25, 0, 0.18, 'triangle', 0.18);
+    playTone(659.25, 0.15, 0.18, 'triangle', 0.18);
+    playTone(783.99, 0.3, 0.3, 'triangle', 0.2);
+  }
+  function playFailBuzz(){
+    playTone(220, 0, 0.25, 'sawtooth', 0.15);
+    playTone(160, 0.2, 0.35, 'sawtooth', 0.15);
+  }
+  function playSpinWhoosh(){
+    playTone(300, 0, 0.4, 'sine', 0.08);
+  }
+
+  // ---------- Wheel ----------
+  function pickRemainingIndex(){
+    var remaining = [];
+    for(var i=0;i<QUESTIONS.length;i++){
+      if(state.usedIndexes.indexOf(i) === -1) remaining.push(i);
+    }
+    return remaining[Math.floor(Math.random() * remaining.length)];
+  }
+
+  function spinWheel(){
+    if(state.usedIndexes.length >= QUESTIONS.length) return;
+    el.spinBtn.disabled = true;
+    var targetIndex = pickRemainingIndex();
+    var segAngle = 72;
+    var center = targetIndex * segAngle + segAngle / 2;
+    var jitter = (Math.random() * 30) - 15;
+    var finalAngle = center + jitter;
+    var neededEndAngle = (360 - finalAngle + 360) % 360;
+    var currentMod = ((state.wheelRotation % 360) + 360) % 360;
+    var deltaToAlign = (neededEndAngle - currentMod + 360) % 360;
+    var extraSpins = 9 * 360;
+    state.wheelRotation += extraSpins + deltaToAlign;
+    el.wheel.style.transform = 'rotate(' + state.wheelRotation + 'deg)';
+    playSpinWhoosh();
+
+    setTimeout(function(){
+      state.currentIndex = targetIndex;
+      state.usedIndexes.push(targetIndex);
+      markWheelUsed(targetIndex);
+      el.spinBtn.disabled = false;
+      startQuestion(targetIndex);
+    }, 10100);
+  }
+
+  function markWheelUsed(index){
+    var numEl = document.getElementById('wnum-' + index);
+    if(numEl) numEl.classList.add('used');
+  }
+
+  function resetWheelVisual(){
+    for(var i=0;i<5;i++){
+      var numEl = document.getElementById('wnum-' + i);
+      if(numEl) numEl.classList.remove('used');
+    }
+  }
+
+  // ---------- Question / Timer ----------
+  function startQuestion(index){
+    state.round++;
+    updateScoreboard();
+    el.qNumberLabel.textContent = 'QUESTION ' + state.round;
+    el.qText.textContent = QUESTIONS[index];
+    el.timerControls.style.display = 'flex';
+    el.judgeControls.style.display = 'none';
+    el.questionHint.style.display = 'block';
+    el.questionHint.textContent = 'Press SPACE when a hand goes up';
+    showScreen('question');
+    runTimer();
+  }
+
+  function runTimer(){
+    state.remaining = TIMER_SECONDS;
+    updateTimerDisplay();
+    clearInterval(state.timerInterval);
+    state.timerInterval = setInterval(function(){
+      state.remaining--;
+      updateTimerDisplay();
+      if(state.remaining <= 10 && state.remaining > 0){
+        playTick();
+      }
+      if(state.remaining <= 0){
+        clearInterval(state.timerInterval);
+        onTimeUp();
+      }
+    }, 1000);
+  }
+
+  function updateTimerDisplay(){
+    el.timerLabel.textContent = Math.max(state.remaining, 0);
+    var offset = RING_CIRCUMFERENCE * (1 - Math.max(state.remaining,0) / TIMER_SECONDS);
+    el.timerRingFg.style.strokeDashoffset = offset;
+    var warn = state.remaining <= 10;
+    el.timerRingFg.classList.toggle('warn', warn);
+    el.timerLabel.classList.toggle('warn', warn);
+  }
+
+  function stopTimer(){
+    if(!el.timerControls.style.display || el.timerControls.style.display === 'none') return;
+    clearInterval(state.timerInterval);
+    el.timerControls.style.display = 'none';
+    el.judgeControls.style.display = 'flex';
+    el.questionHint.textContent = 'Mark the answer';
+  }
+
+  function onTimeUp(){
+    el.timerControls.style.display = 'none';
+    el.judgeControls.style.display = 'none';
+    showResult(false, true);
+  }
+
+  // ---------- Result ----------
+  function showResult(isCorrect, isTimeout){
+    if(isCorrect){
+      state.audienceScore++;
+      el.resultEmoji.textContent = '🎉';
+      el.resultTitle.textContent = 'Correct!';
+      el.resultTitle.className = 'result-title correct';
+      el.resultSub.textContent = '+1 protein bar for the audience! 🍫';
+      launchConfetti();
+      playSuccessChime();
+    } else {
+      state.judgeScore++;
+      el.resultEmoji.textContent = isTimeout ? '⏰' : '⚖️';
+      el.resultTitle.textContent = isTimeout ? "Time's Up!" : 'Incorrect!';
+      el.resultTitle.className = 'result-title incorrect';
+      el.resultSub.textContent = 'That protein bar goes to the judges! 🍫';
+      playFailBuzz();
+    }
+    updateScoreboard();
+    showScreen('result');
+
+    if(state.round >= QUESTIONS.length){
+      el.nextBtn.textContent = 'See Final Results';
+    } else {
+      el.nextBtn.textContent = 'Next Question';
+    }
+  }
+
+  function goNextFromResult(){
+    if(state.round >= QUESTIONS.length){
+      showFinal();
+    } else {
+      showScreen('wheel');
+    }
+  }
+
+  function showFinal(){
+    el.finalAudienceVal.textContent = state.audienceScore + ' 🍫';
+    el.finalJudgesVal.textContent = state.judgeScore + ' 🍫';
+    showScreen('final');
+    if(state.audienceScore >= state.judgeScore){
+      launchConfetti();
+    }
+  }
+
+  // ---------- Confetti ----------
+  var CONFETTI_COLORS = ['#7C3AED','#FB923C','#FBBF24','#EC4899','#22D3EE','#22C55E'];
+  function launchConfetti(){
+    var count = 70;
+    for(var i=0;i<count;i++){
+      var piece = document.createElement('div');
+      piece.className = 'confetti-piece';
+      piece.style.left = (Math.random()*100) + 'vw';
+      piece.style.background = CONFETTI_COLORS[Math.floor(Math.random()*CONFETTI_COLORS.length)];
+      piece.style.animationDuration = (2.2 + Math.random()*1.8) + 's';
+      piece.style.animationDelay = (Math.random()*0.4) + 's';
+      piece.style.borderRadius = (Math.random() > 0.5) ? '50%' : '2px';
+      el.confettiLayer.appendChild(piece);
+      (function(p){
+        setTimeout(function(){ p.remove(); }, 4500);
+      })(piece);
+    }
+  }
+
+  // ---------- Reset ----------
+  function resetGame(){
+    clearInterval(state.timerInterval);
+    state.round = 0;
+    state.audienceScore = 0;
+    state.judgeScore = 0;
+    state.usedIndexes = [];
+    state.currentIndex = -1;
+    state.wheelRotation = 0;
+    el.wheel.style.transition = 'none';
+    el.wheel.style.transform = 'rotate(0deg)';
+    requestAnimationFrame(function(){
+      el.wheel.style.transition = '';
+    });
+    resetWheelVisual();
+    updateScoreboard();
+    showScreen('title');
+  }
+
+  // ---------- Events ----------
+  el.startBtn.addEventListener('click', function(){
+    showScreen('wheel');
+  });
+  el.spinBtn.addEventListener('click', spinWheel);
+  el.stopBtn.addEventListener('click', stopTimer);
+  el.correctBtn.addEventListener('click', function(){ showResult(true, false); });
+  el.incorrectBtn.addEventListener('click', function(){ showResult(false, false); });
+  el.nextBtn.addEventListener('click', goNextFromResult);
+  el.playAgainBtn.addEventListener('click', resetGame);
+  el.resetLink.addEventListener('click', resetGame);
+
+  document.addEventListener('keydown', function(e){
+    var key = e.key;
+    if(key === ' '){
+      e.preventDefault();
+      if(el.screens.question.classList.contains('active') && el.timerControls.style.display !== 'none'){
+        stopTimer();
+      }
+    } else if(key === 'Enter'){
+      if(el.screens.title.classList.contains('active')){
+        showScreen('wheel');
+      } else if(el.screens.wheel.classList.contains('active')){
+        spinWheel();
+      } else if(el.screens.result.classList.contains('active')){
+        goNextFromResult();
+      } else if(el.screens.final.classList.contains('active')){
+        resetGame();
+      }
+    } else if(key === 'c' || key === 'C'){
+      if(el.screens.question.classList.contains('active') && el.judgeControls.style.display !== 'none'){
+        showResult(true, false);
+      }
+    } else if(key === 'i' || key === 'I'){
+      if(el.screens.question.classList.contains('active') && el.judgeControls.style.display !== 'none'){
+        showResult(false, false);
+      }
+    } else if(key === 'r' || key === 'R'){
+      resetGame();
+    }
+  });
+
+  updateScoreboard();
+  showScreen('title');
+})();
+</script>
+</body>
+</html>
