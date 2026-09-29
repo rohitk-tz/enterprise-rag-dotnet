@@ -11,9 +11,9 @@ Companion material for the talk *Building Enterprise RAG Applications with .NET*
 ## Running the code
 
 ```bash
-cd Code
+git clone https://github.com/rohitk-tz/enterprise-rag-dotnet.git
+cd enterprise-rag-dotnet/Code
 cp .env.example .env                  # fill in your own keys
-cp frontend/.env.example frontend/.env
 docker compose up --build
 ```
 

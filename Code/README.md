@@ -186,6 +186,9 @@ Every external dependency (database, OpenAI, Cohere, S3, ScrapingBee, the parsin
 ### Run everything with Docker Compose
 
 ```bash
+git clone https://github.com/rohitk-tz/enterprise-rag-dotnet.git
+cd enterprise-rag-dotnet/Code          # all commands below run from this Code/ directory
+
 cp .env.example .env
 # fill in CLERK_AUTHORITY, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY,
 # OPENAI_API_KEY, SCRAPINGBEE_API_KEY, AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, COHERE_API_KEY
@@ -234,6 +237,7 @@ poetry run uvicorn main:app --reload --port 8001
 **Frontend**
 ```bash
 cd frontend
+cp .env.example .env.local   # fill in the Clerk keys
 npm install
 npm run dev
 ```
